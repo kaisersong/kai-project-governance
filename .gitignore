@@ -4,3 +4,6 @@ __pycache__/
 *.egg-info/
 .governance-claims/
 .governance-log/
+
+# Local symlink to mydocs
+docs

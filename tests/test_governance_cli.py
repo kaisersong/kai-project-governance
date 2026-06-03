@@ -214,6 +214,31 @@ def test_status_no_claim(workspace):
     assert r["hasActiveClaim"] is False
 
 
+# --- Check governanceMode ---
+
+def test_check_shows_governance_mode(workspace):
+    r = _gov(workspace, "check", "--files", "src/main.py")
+    assert "governanceMode" in r
+    assert r["governanceMode"] == "lint"
+
+
+# --- Tier 2: Notify ---
+
+def test_notify_creates_log(workspace):
+    r = _gov(workspace, "notify",
+             "--phase", "committing",
+             "--files", "src/main.py",
+             "--summary", "test commit")
+    assert r["status"] == "notified"
+
+    log_file = workspace / ".governance-log" / "test-agent-001.jsonl"
+    assert log_file.exists()
+    lines = log_file.read_text().strip().splitlines()
+    entry = json.loads(lines[-1])
+    assert entry["approvalStatus"] == "notified_pm"
+    assert entry["phase"] == "committing"
+
+
 # --- Agent ID stability ---
 
 def test_agent_id_consistent_across_calls(workspace):

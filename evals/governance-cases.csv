@@ -1,0 +1,11 @@
+case_id,scenario,human_in_loop,conflict_present,broker_up,expected_behavior,notes
+claim-no-conflict,Agent claims files with no other claims,true,false,true,Proceed without approval,Happy path — no conflict, human driving
+claim-no-conflict-autonomous,Agent claims files with no other claims,false,false,true,Proceed without approval,Autonomous but no overlap
+claim-conflict-human,Agent claims files overlapping with another agent,true,true,true,Show warning and proceed,Human sees conflict info but is not blocked
+claim-conflict-autonomous,Agent claims files overlapping with another agent,false,true,true,Request PM approval,Standard conflict case
+claim-conflict-timeout,Agent requests PM approval but gets no response,false,true,true,Degrade and proceed with DEGRADED_CONFLICT log,PM not responding within 120s
+broker-down-no-conflict,Broker unreachable, no local claims from others,false,false,false,Proceed with BROKER_DOWN_DEGRADED log,Broker down but safe
+broker-down-with-claims,Broker unreachable, local claims show conflict,false,true,false,Pause and notify human via terminal,Conservative mode when broker is down
+claim-expiry,Agent checks claims where some are expired,false,false,true,Ignore expired claims,Old claims should not block
+claim-scope-expansion,Agent discovers additional files mid-task,false,false,true,Expand claim with new files,Incremental scope update
+destructive-operation,Agent about to delete a file,true,false,true,Show critical warning and proceed,Destructive ops always warn even with human

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "kai-project-governance eval rubric",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "verdict",
+    "scores",
+    "findings",
+    "summary"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "needs_work", "fail"]
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_protocol",
+        "conflict_detection",
+        "degradation_handling",
+        "log_integrity"
+      ],
+      "properties": {
+        "claim_protocol": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Claim created with correct fields, stored locally, broadcast via broker"
+        },
+        "conflict_detection": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Conflicts correctly identified across files, directories, and mayAffect"
+        },
+        "degradation_handling": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Broker-down and PM-timeout handled with correct fallback behavior"
+        },
+        "log_integrity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Log entries have correct schema, valid phases, valid statuses"
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["layer", "severity", "message", "evidence"],
+        "properties": {
+          "layer": {
+            "type": "string",
+            "enum": ["claim_protocol", "conflict_detection", "degradation_handling", "log_integrity"]
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

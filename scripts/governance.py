@@ -79,31 +79,64 @@ def _git_head() -> str:
 
 
 def _resolve_pm_id() -> str:
-    """Discover PM participant ID from env or project config. Raises if not found."""
-    pm_id = os.environ.get("GOVERNANCE_PM_ID", "").strip()
-    if not pm_id:
-        config_file = _repo_root() / ".governance.json"
-        if config_file.exists():
-            try:
-                pm_id = json.loads(config_file.read_text()).get("pmId", "").strip()
-            except (json.JSONDecodeError, KeyError):
-                pass
-    if not pm_id:
-        raise RuntimeError(
-            "PM participant ID not configured. "
-            "Set GOVERNANCE_PM_ID env var or create .governance.json "
-            'with {"pmId": "<participantId>"}'
+    """Discover PM participant ID. Discovery order:
+
+    1. Broker role query: GET /participants?role=governance-pm
+    2. GOVERNANCE_PM_ID env var (explicit override)
+    3. .governance.json in repo root: {\"pmId\": \"<participantId>\"}
+    4. FAIL — no guess, no hardcoded defaults
+    """
+    BROKER_URL = os.environ.get("BROKER_URL", "http://127.0.0.1:4318")
+
+    # 1. Broker role discovery
+    try:
+        result = subprocess.run(
+            ["curl", "-s", f"{BROKER_URL}/participants?role=governance-pm"],
+            capture_output=True, text=True, timeout=5,
         )
-    return pm_id
+        data = json.loads(result.stdout)
+        participants = data.get("participants", [])
+        if participants:
+            # Prefer the first online governance-pm
+            for p in participants:
+                if p.get("alias"):
+                    return p["participantId"]
+            # Return first participantId even without alias
+            return participants[0].get("participantId", "")
+    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
+        pass
+
+    # 2. Env var
+    pm_id = os.environ.get("GOVERNANCE_PM_ID", "").strip()
+    if pm_id:
+        return pm_id
+
+    # 3. Project config
+    config_file = _repo_root() / ".governance.json"
+    if config_file.exists():
+        try:
+            pm_id = json.loads(config_file.read_text()).get("pmId", "").strip()
+            if pm_id:
+                return pm_id
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    raise RuntimeError(
+        "PM participant ID not discovered. "
+        "Ensure a participant has role 'governance-pm', "
+        "or set GOVERNANCE_PM_ID env var, "
+        'or create .governance.json with {"pmId": "<participantId>"}'
+    )
 
 
 def _send_to_pm(summary: str, task_id: str | None = None, thread_id: str | None = None) -> dict:
     """Send a message to PM via broker HTTP API. Returns delivery result dict.
 
     PM participant ID is discovered in this order:
-    1. GOVERNANCE_PM_ID env var (explicit override)
-    2. .governance.json in repo root (project-level config)
-    3. FAIL — no guess, no hardcoded defaults
+    1. Broker role query (role=governance-pm)
+    2. GOVERNANCE_PM_ID env var
+    3. .governance.json in repo root
+    4. FAIL
     """
     BROKER_URL = os.environ.get("BROKER_URL", "http://127.0.0.1:4318")
 

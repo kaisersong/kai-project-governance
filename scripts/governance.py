@@ -78,6 +78,34 @@ def _git_head() -> str:
         return "unknown"
 
 
+def _send_to_pm(summary: str, task_id: str | None = None, thread_id: str | None = None) -> dict:
+    """Send a message to PM via broker HTTP API. Returns delivery result dict."""
+    BROKER_URL = os.environ.get("BROKER_URL", "http://127.0.0.1:4318")
+    PM_PARTICIPANT_ID = os.environ.get(
+        "GOVERNANCE_PM_ID", "qodercli-session-f782cff3"
+    )
+
+    payload = {
+        "kind": "reply_message",
+        "fromParticipantId": _agent_id(),
+        "taskId": task_id,
+        "threadId": thread_id,
+        "to": {"mode": "participant", "participants": [PM_PARTICIPANT_ID]},
+        "payload": {"body": {"summary": summary}},
+    }
+
+    try:
+        result = subprocess.run(
+            ["curl", "-s", "-X", "POST", f"{BROKER_URL}/intents",
+             "-H", "Content-Type: application/json",
+             "-d", json.dumps(payload)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
+        return {"deliveredCount": 0, "error": "broker_unreachable"}
+
+
 def _project_name(repo_root: Path) -> str:
     return repo_root.name
 
@@ -248,14 +276,9 @@ def cmd_notify(args: argparse.Namespace) -> None:
            f"HEAD: {git_head}\n"
            f"Summary: {summary}")
 
-    if _is_broker_available():
-        try:
-            subprocess.run(
-                ["intent-broker", "reply", "@qoder", msg],
-                capture_output=True, text=True, timeout=10,
-            )
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+    delivery = _send_to_pm(msg, task_id="governance-three-tier",
+                           thread_id="governance-push-review")
+    delivered = delivery.get("deliveredCount", 0) > 0
 
     # Always log
     _append_log(repo_root, agent_id, {
@@ -267,11 +290,17 @@ def cmd_notify(args: argparse.Namespace) -> None:
         "files": files,
         "humanInLoop": False,
         "conflictDetected": False,
-        "approvalStatus": "notified_pm",
+        "approvalStatus": "notified_pm" if delivered else "notify_failed",
         "gitHeadAtAction": git_head,
+        "deliveryResult": delivery,
     })
 
-    print(json.dumps({"status": "notified", "recipient": "qoder", "phase": phase}))
+    print(json.dumps({
+        "status": "notified" if delivered else "notify_failed",
+        "recipient": "qoder",
+        "delivered": delivered,
+        "phase": phase,
+    }))
 
 
 def cmd_request_approval(args: argparse.Namespace) -> None:
@@ -286,7 +315,6 @@ def cmd_request_approval(args: argparse.Namespace) -> None:
     timeout = args.timeout or 120
 
     if not _is_broker_available():
-        # Broker down → degrade
         _append_log(repo_root, agent_id, {
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "agentId": agent_id, "project": project, "phase": phase,
@@ -297,59 +325,56 @@ def cmd_request_approval(args: argparse.Namespace) -> None:
         print(json.dumps({"status": "degraded", "reason": "broker_down", "proceed": True}))
         return
 
-    # Create approval task
-    task_msg = (f"APPROVAL REQUEST (gate mode) from {agent_id}\n"
-                f"Project: {project} / Phase: {phase}\n"
-                f"Files: {', '.join(files)}\n"
-                f"HEAD: {git_head}\n"
-                f"Summary: {summary}")
+    # Send approval request via HTTP API
+    task_id = f"governance-approval-{agent_id}-{int(time.time())}"
+    msg = (f"APPROVAL REQUEST (gate mode) from {agent_id}\n"
+           f"Project: {project} / Phase: {phase}\n"
+           f"Files: {', '.join(files)}\n"
+           f"HEAD: {git_head}\n"
+           f"Summary: {summary}")
 
-    try:
-        result = subprocess.run(
-            ["intent-broker", "task", "create", task_msg, "--assign", "qoder"],
-            capture_output=True, text=True, timeout=10,
-        )
-        # Extract task ID from output
-        task_id = None
-        for line in result.stdout.splitlines():
-            if "taskId" in line or "task=" in line.lower():
-                import re
-                m = re.search(r'task[=:]\s*([\w-]+)', line)
-                if m:
-                    task_id = m.group(1)
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        task_id = None
+    delivery = _send_to_pm(msg, task_id=task_id)
 
     # Wait for PM response (poll inbox)
+    PM_PARTICIPANT_ID = os.environ.get(
+        "GOVERNANCE_PM_ID", "qodercli-session-f782cff3"
+    )
+    BROKER_URL = os.environ.get("BROKER_URL", "http://127.0.0.1:4318")
     start = time.time()
     while time.time() - start < timeout:
         try:
-            inbox = subprocess.run(
-                ["intent-broker", "inbox"],
+            result = subprocess.run(
+                ["curl", "-s", f"{BROKER_URL}/inbox/{PM_PARTICIPANT_ID}?after=0&limit=5"],
                 capture_output=True, text=True, timeout=5,
             )
-            # Simple check: if inbox shows a reply to us, approved
-            if "approved" in inbox.stdout.lower() or "APPROVED" in inbox.stdout:
-                _append_log(repo_root, agent_id, {
-                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "agentId": agent_id, "project": project, "phase": phase,
-                    "action": summary, "files": files,
-                    "humanInLoop": False, "conflictDetected": True,
-                    "approvalStatus": "approved", "gitHeadAtAction": git_head,
-                })
-                print(json.dumps({"status": "approved", "taskId": task_id}))
-                return
-            if "rejected" in inbox.stdout.lower() or "REJECTED" in inbox.stdout:
-                _append_log(repo_root, agent_id, {
-                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "agentId": agent_id, "project": project, "phase": phase,
-                    "action": summary, "files": files,
-                    "humanInLoop": False, "conflictDetected": True,
-                    "approvalStatus": "rejected", "gitHeadAtAction": git_head,
-                })
-                print(json.dumps({"status": "rejected", "taskId": task_id}))
-                sys.exit(1)
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+            inbox_data = json.loads(result.stdout)
+            items = inbox_data.get("items", [])
+            for item in items:
+                body = item.get("payload", {}).get("body", {}).get("summary", "").lower()
+                if task_id.lower() in body or "approved" in body or "rejected" in body:
+                    if "approved" in body:
+                        _append_log(repo_root, agent_id, {
+                            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "agentId": agent_id, "project": project, "phase": phase,
+                            "action": summary, "files": files,
+                            "humanInLoop": False, "conflictDetected": True,
+                            "approvalStatus": "approved", "approvalId": task_id,
+                            "gitHeadAtAction": git_head,
+                        })
+                        print(json.dumps({"status": "approved", "approvalId": task_id}))
+                        return
+                    elif "rejected" in body:
+                        _append_log(repo_root, agent_id, {
+                            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "agentId": agent_id, "project": project, "phase": phase,
+                            "action": summary, "files": files,
+                            "humanInLoop": False, "conflictDetected": True,
+                            "approvalStatus": "rejected", "approvalId": task_id,
+                            "gitHeadAtAction": git_head,
+                        })
+                        print(json.dumps({"status": "rejected", "approvalId": task_id}))
+                        sys.exit(1)
+        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
             pass
         time.sleep(5)
 
@@ -359,9 +384,11 @@ def cmd_request_approval(args: argparse.Namespace) -> None:
         "agentId": agent_id, "project": project, "phase": phase,
         "action": summary, "files": files,
         "humanInLoop": False, "conflictDetected": True,
-        "approvalStatus": "DEGRADED_CONFLICT", "gitHeadAtAction": git_head,
+        "approvalStatus": "DEGRADED_CONFLICT", "approvalId": task_id,
+        "gitHeadAtAction": git_head,
     })
-    print(json.dumps({"status": "degraded", "reason": "timeout", "proceed": True, "waited_seconds": int(time.time() - start)}))
+    print(json.dumps({"status": "degraded", "reason": "timeout", "proceed": True,
+                       "waited_seconds": int(time.time() - start), "approvalId": task_id}))
 
 
 def cmd_check(args: argparse.Namespace) -> None:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -232,6 +233,137 @@ def cmd_claim(args: argparse.Namespace) -> None:
     print(json.dumps({"status": "claimed", "claim": claim}, ensure_ascii=False))
 
 
+def cmd_notify(args: argparse.Namespace) -> None:
+    """Tier 2: Send non-blocking notification to PM about a commit/push."""
+    repo_root = _repo_root()
+    agent_id = _agent_id()
+    project = _project_name(repo_root)
+    phase = args.phase
+    git_head = args.git_head or _git_head()
+    files = args.files or []
+    summary = args.summary or f"{phase}: {', '.join(files) if files else 'changes'}"
+
+    msg = (f"[governance] {agent_id} → {phase} in {project}\n"
+           f"Files: {', '.join(files) if files else '(none listed)'}\n"
+           f"HEAD: {git_head}\n"
+           f"Summary: {summary}")
+
+    if _is_broker_available():
+        try:
+            subprocess.run(
+                ["intent-broker", "reply", "@qoder", msg],
+                capture_output=True, text=True, timeout=10,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    # Always log
+    _append_log(repo_root, agent_id, {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "agentId": agent_id,
+        "project": project,
+        "phase": phase,
+        "action": summary,
+        "files": files,
+        "humanInLoop": False,
+        "conflictDetected": False,
+        "approvalStatus": "notified_pm",
+        "gitHeadAtAction": git_head,
+    })
+
+    print(json.dumps({"status": "notified", "recipient": "qoder", "phase": phase}))
+
+
+def cmd_request_approval(args: argparse.Namespace) -> None:
+    """Tier 3 (gate mode): Request PM approval and wait for response."""
+    repo_root = _repo_root()
+    agent_id = _agent_id()
+    project = _project_name(repo_root)
+    phase = args.phase
+    git_head = args.git_head or _git_head()
+    files = args.files or []
+    summary = args.summary or f"{phase}: {', '.join(files) if files else 'changes'}"
+    timeout = args.timeout or 120
+
+    if not _is_broker_available():
+        # Broker down → degrade
+        _append_log(repo_root, agent_id, {
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "agentId": agent_id, "project": project, "phase": phase,
+            "action": summary, "files": files,
+            "humanInLoop": False, "conflictDetected": True,
+            "approvalStatus": "BROKER_DOWN_DEGRADED", "gitHeadAtAction": git_head,
+        })
+        print(json.dumps({"status": "degraded", "reason": "broker_down", "proceed": True}))
+        return
+
+    # Create approval task
+    task_msg = (f"APPROVAL REQUEST (gate mode) from {agent_id}\n"
+                f"Project: {project} / Phase: {phase}\n"
+                f"Files: {', '.join(files)}\n"
+                f"HEAD: {git_head}\n"
+                f"Summary: {summary}")
+
+    try:
+        result = subprocess.run(
+            ["intent-broker", "task", "create", task_msg, "--assign", "qoder"],
+            capture_output=True, text=True, timeout=10,
+        )
+        # Extract task ID from output
+        task_id = None
+        for line in result.stdout.splitlines():
+            if "taskId" in line or "task=" in line.lower():
+                import re
+                m = re.search(r'task[=:]\s*([\w-]+)', line)
+                if m:
+                    task_id = m.group(1)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        task_id = None
+
+    # Wait for PM response (poll inbox)
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            inbox = subprocess.run(
+                ["intent-broker", "inbox"],
+                capture_output=True, text=True, timeout=5,
+            )
+            # Simple check: if inbox shows a reply to us, approved
+            if "approved" in inbox.stdout.lower() or "APPROVED" in inbox.stdout:
+                _append_log(repo_root, agent_id, {
+                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "agentId": agent_id, "project": project, "phase": phase,
+                    "action": summary, "files": files,
+                    "humanInLoop": False, "conflictDetected": True,
+                    "approvalStatus": "approved", "gitHeadAtAction": git_head,
+                })
+                print(json.dumps({"status": "approved", "taskId": task_id}))
+                return
+            if "rejected" in inbox.stdout.lower() or "REJECTED" in inbox.stdout:
+                _append_log(repo_root, agent_id, {
+                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "agentId": agent_id, "project": project, "phase": phase,
+                    "action": summary, "files": files,
+                    "humanInLoop": False, "conflictDetected": True,
+                    "approvalStatus": "rejected", "gitHeadAtAction": git_head,
+                })
+                print(json.dumps({"status": "rejected", "taskId": task_id}))
+                sys.exit(1)
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        time.sleep(5)
+
+    # Timeout → degrade
+    _append_log(repo_root, agent_id, {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "agentId": agent_id, "project": project, "phase": phase,
+        "action": summary, "files": files,
+        "humanInLoop": False, "conflictDetected": True,
+        "approvalStatus": "DEGRADED_CONFLICT", "gitHeadAtAction": git_head,
+    })
+    print(json.dumps({"status": "degraded", "reason": "timeout", "proceed": True, "waited_seconds": int(time.time() - start)}))
+
+
 def cmd_check(args: argparse.Namespace) -> None:
     repo_root = _repo_root()
     agent_id = _agent_id()
@@ -244,11 +376,14 @@ def cmd_check(args: argparse.Namespace) -> None:
     conflicts = _find_conflicts(files, dirs, active_claims, agent_id)
     broker_up = _is_broker_available()
 
+    gate_mode = os.environ.get("GOVERNANCE_MODE", "lint")
+
     result = {
         "brokerAvailable": broker_up,
         "activeClaims": len(active_claims),
         "conflicts": conflicts,
         "hasConflict": len(conflicts) > 0,
+        "governanceMode": gate_mode,
     }
 
     print(json.dumps(result, ensure_ascii=False))
@@ -466,6 +601,21 @@ def main() -> None:
     # status
     p_status = sub.add_parser("status", help="Show current governance state")
 
+    # notify (tier 2: non-blocking PM notification)
+    p_notify = sub.add_parser("notify", help="Send non-blocking notification to PM about commit/push")
+    p_notify.add_argument("--phase", required=True, help="committing/verifying")
+    p_notify.add_argument("--files", nargs="*", default=[], help="Files involved")
+    p_notify.add_argument("--git-head", default=None, help="Git HEAD at time of notification")
+    p_notify.add_argument("--summary", default=None, help="One-line summary of the change")
+
+    # request-approval (tier 3: gate mode blocking approval)
+    p_req = sub.add_parser("request-approval", help="Request PM approval and wait (gate mode)")
+    p_req.add_argument("--phase", required=True, help="committing/verifying")
+    p_req.add_argument("--files", nargs="*", default=[], help="Files involved")
+    p_req.add_argument("--git-head", default=None, help="Git HEAD at time of request")
+    p_req.add_argument("--summary", default=None, help="One-line summary of the change")
+    p_req.add_argument("--timeout", type=int, default=120, help="Timeout in seconds (default 120)")
+
     args = parser.parse_args()
 
     commands = {
@@ -474,6 +624,8 @@ def main() -> None:
         "renew": cmd_renew,
         "expand": cmd_expand,
         "release": cmd_release,
+        "notify": cmd_notify,
+        "request-approval": cmd_request_approval,
         "log": cmd_log,
         "cleanup": cmd_cleanup,
         "status": cmd_status,

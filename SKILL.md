@@ -7,7 +7,17 @@ description: "Use before modifying, deleting, committing, pushing, changing conf
 
 Multi-agent conflict prevention for AI coding environments.
 
-This skill is a **concurrency safety lint** — not a lock, not a gate. It reduces
+## Three-Tier Behavior Model
+
+| Tier | Name | When | Behavior |
+|------|------|------|----------|
+| 1 (default) | **LINT** | Always active | Conflict detection + warning. Only blocks if conflict AND no human present. |
+| 2 (always on) | **NOTIFY** | On every commit/push | Sends non-blocking notification to PM. Never blocks. |
+| 3 (optional) | **GATE** | When `GOVERNANCE_MODE=gate` | Blocks on every commit/push, waits for PM approval. 120s timeout → degrade. |
+
+**Tier 1 is always on.** Tier 2 is also always on (every commit/push notifies PM). Tier 3 is opt-in via `GOVERNANCE_MODE=gate` environment variable.
+
+This skill is a **concurrency safety lint** — not a lock, not a gate (unless gate mode is explicitly requested). It reduces
 the probability of agents trampling each other's work by making workspace claims
 visible and routing conflicts to a human decision-maker (PM) when no human is
 actively driving the agent.
@@ -151,6 +161,42 @@ python3 scripts/governance.py release
 ```
 
 This removes your claim file and broadcasts a release message.
+
+### Tier 2 — Always Notify PM on Commit/Push
+
+Every commit or push sends a non-blocking notification to PM. This never blocks
+the agent — PM sees the notification in their inbox.
+
+```bash
+python3 scripts/governance.py notify \
+  --phase committing \
+  --files src/module/main.py src/module/types.py \
+  --git-head "$(git rev-parse HEAD)" \
+  --summary "add feature X and fix bug Y"
+```
+
+The notification is sent via `intent-broker reply @qoder` and logged to
+`.governance-log/<agent-id>.jsonl` with status `notified_pm`.
+
+### Tier 3 — Gate Mode (Opt-In)
+
+When `GOVERNANCE_MODE=gate` is set, every commit/push blocks and waits for PM
+approval. Timeout is 120 seconds by default.
+
+```bash
+# Set gate mode
+export GOVERNANCE_MODE=gate
+
+# Request approval (blocks until PM responds or timeout)
+python3 scripts/governance.py request-approval \
+  --phase committing \
+  --files src/module/main.py \
+  --git-head "$(git rev-parse HEAD)" \
+  --timeout 120
+```
+
+If PM approves → proceed. If PM rejects → stop. If timeout → degrade (proceed
+with `DEGRADED_CONFLICT` log entry).
 
 ## Controlled nodes
 

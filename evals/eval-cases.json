@@ -1,0 +1,178 @@
+{
+  "skill_name": "kai-project-governance",
+  "evals": [
+    {
+      "id": 1,
+      "name": "happy-path-no-conflict",
+      "prompt": "Agent starts a task to edit src/main.py. No other agents have active claims.",
+      "steps": [
+        {"cmd": "claim", "args": {"files": ["src/main.py"]}},
+        {"cmd": "check", "args": {"files": ["src/main.py"]}, "assert": {"hasConflict": false}},
+        {"cmd": "log", "args": {"phase": "implementing", "action": "edit", "status": "no_conflict"}},
+        {"cmd": "release"}
+      ],
+      "expected": {
+        "claim_created": true,
+        "conflict_detected": false,
+        "log_status": "no_conflict",
+        "claim_released": true
+      }
+    },
+    {
+      "id": 2,
+      "name": "file-conflict-detection",
+      "prompt": "Agent B wants to edit src/main.py, but Agent A already claimed it.",
+      "setup": [
+        {"cmd": "claim", "agent": "agent-a", "args": {"files": ["src/main.py"]}}
+      ],
+      "steps": [
+        {"cmd": "check", "agent": "agent-b", "args": {"files": ["src/main.py"]}, "assert": {"hasConflict": true, "conflict_count": 1}},
+        {"cmd": "log", "agent": "agent-b", "args": {"phase": "implementing", "action": "edit", "status": "DEGRADED_CONFLICT", "conflict": true}}
+      ],
+      "expected": {
+        "conflict_detected": true,
+        "conflicting_agent": "agent-a",
+        "log_status": "DEGRADED_CONFLICT"
+      },
+      "teardown": [
+        {"cmd": "release", "agent": "agent-a"}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "directory-conflict",
+      "prompt": "Agent A claims src/module/ directory. Agent B edits src/module/foo.py.",
+      "setup": [
+        {"cmd": "claim", "agent": "agent-a", "args": {"dirs": ["src/module/"]}}
+      ],
+      "steps": [
+        {"cmd": "check", "agent": "agent-b", "args": {"files": ["src/module/foo.py"]}, "assert": {"hasConflict": true}}
+      ],
+      "expected": {"conflict_detected": true},
+      "teardown": [{"cmd": "release", "agent": "agent-a"}]
+    },
+    {
+      "id": 4,
+      "name": "may-affect-conflict",
+      "prompt": "Agent A claims src/a.py with mayAffect src/shared.py. Agent B edits src/shared.py.",
+      "setup": [
+        {"cmd": "claim", "agent": "agent-a", "args": {"files": ["src/a.py"], "may_affect": ["src/shared.py"]}}
+      ],
+      "steps": [
+        {"cmd": "check", "agent": "agent-b", "args": {"files": ["src/shared.py"]}, "assert": {"hasConflict": true}}
+      ],
+      "expected": {"conflict_detected": true},
+      "teardown": [{"cmd": "release", "agent": "agent-a"}]
+    },
+    {
+      "id": 5,
+      "name": "expired-claim-ignored",
+      "prompt": "An expired claim from old-agent should not trigger conflict.",
+      "setup": [
+        {"write_claim": {"agent": "old-agent", "expiresAt": "2020-01-01T00:00:00Z", "files": ["src/main.py"]}}
+      ],
+      "steps": [
+        {"cmd": "check", "args": {"files": ["src/main.py"]}, "assert": {"hasConflict": false}},
+        {"cmd": "cleanup", "assert": {"removed": 1}}
+      ],
+      "expected": {"conflict_detected": false, "expired_cleaned": true}
+    },
+    {
+      "id": 6,
+      "name": "claim-lifecycle-full",
+      "prompt": "Full lifecycle: claim → check → renew → expand → check → release.",
+      "steps": [
+        {"cmd": "claim", "args": {"files": ["src/a.py"]}},
+        {"cmd": "check", "args": {"files": ["src/a.py"]}, "assert": {"hasConflict": false}},
+        {"cmd": "renew", "args": {"ttl": 30}},
+        {"cmd": "expand", "args": {"files": ["src/b.py"], "may_affect": ["src/types.py"]}},
+        {"cmd": "check", "args": {"files": ["src/b.py"]}, "assert": {"hasConflict": false}},
+        {"cmd": "release"},
+        {"cmd": "status", "assert": {"hasActiveClaim": false}}
+      ],
+      "expected": {"full_lifecycle_ok": true}
+    },
+    {
+      "id": 7,
+      "name": "multi-agent-three-way-conflict",
+      "prompt": "Three agents all claim the same file. Agent C should see conflicts from both A and B.",
+      "setup": [
+        {"cmd": "claim", "agent": "agent-a", "args": {"files": ["src/main.py"]}},
+        {"cmd": "claim", "agent": "agent-b", "args": {"files": ["src/main.py"]}}
+      ],
+      "steps": [
+        {"cmd": "check", "agent": "agent-c", "args": {"files": ["src/main.py"]}, "assert": {"hasConflict": true, "conflict_count": 2}}
+      ],
+      "expected": {"conflict_detected": true, "conflict_count": 2},
+      "teardown": [
+        {"cmd": "release", "agent": "agent-a"},
+        {"cmd": "release", "agent": "agent-b"}
+      ]
+    },
+    {
+      "id": 8,
+      "name": "self-no-conflict",
+      "prompt": "Agent checks against its own claim. Should not see self as conflict.",
+      "setup": [
+        {"cmd": "claim", "args": {"files": ["src/main.py"]}}
+      ],
+      "steps": [
+        {"cmd": "check", "args": {"files": ["src/main.py"]}, "assert": {"hasConflict": false}}
+      ],
+      "expected": {"conflict_detected": false},
+      "teardown": [{"cmd": "release"}]
+    },
+    {
+      "id": 9,
+      "name": "log-all-phases",
+      "prompt": "Log entries for all 6 phases should be accepted.",
+      "steps": [
+        {"cmd": "log", "args": {"phase": "planning", "action": "plan", "status": "no_conflict"}},
+        {"cmd": "log", "args": {"phase": "implementing", "action": "edit", "status": "no_conflict"}},
+        {"cmd": "log", "args": {"phase": "destructive", "action": "delete", "status": "approved"}},
+        {"cmd": "log", "args": {"phase": "committing", "action": "push", "status": "no_conflict"}},
+        {"cmd": "log", "args": {"phase": "configuring", "action": "config", "status": "no_conflict"}},
+        {"cmd": "log", "args": {"phase": "verifying", "action": "deploy", "status": "no_conflict"}}
+      ],
+      "expected": {"log_count": 6, "all_phases_logged": true}
+    },
+    {
+      "id": 10,
+      "name": "log-all-statuses",
+      "prompt": "Log entries for all 6 approval statuses should be accepted.",
+      "steps": [
+        {"cmd": "log", "args": {"phase": "implementing", "action": "test", "status": "approved"}},
+        {"cmd": "log", "args": {"phase": "implementing", "action": "test", "status": "skipped_human_in_loop_with_warning", "human_in_loop": true}},
+        {"cmd": "log", "args": {"phase": "implementing", "action": "test", "status": "no_conflict"}},
+        {"cmd": "log", "args": {"phase": "implementing", "action": "test", "status": "DEGRADED_CONFLICT", "conflict": true}},
+        {"cmd": "log", "args": {"phase": "implementing", "action": "test", "status": "BROKER_DOWN_DEGRADED"}},
+        {"cmd": "log", "args": {"phase": "implementing", "action": "test", "status": "rejected"}}
+      ],
+      "expected": {"log_count": 6, "all_statuses_logged": true}
+    },
+    {
+      "id": 11,
+      "name": "path-normalization",
+      "prompt": "Claim with ./prefixed and trailing-slash paths should normalize correctly.",
+      "steps": [
+        {"cmd": "claim", "args": {"files": ["./src/main.py"], "dirs": ["src/module/"]}},
+        {"cmd": "check", "args": {"files": ["./src/main.py"]}, "assert": {"hasConflict": false}},
+        {"cmd": "status", "assert": {"hasActiveClaim": true}},
+        {"cmd": "release"}
+      ],
+      "expected": {"paths_normalized": true}
+    },
+    {
+      "id": 12,
+      "name": "agent-id-stability",
+      "prompt": "Agent ID should be consistent across multiple CLI invocations.",
+      "steps": [
+        {"cmd": "status", "assert_key": "agentId"},
+        {"cmd": "claim", "args": {"files": ["src/a.py"]}},
+        {"cmd": "status", "assert_key": "agentId"},
+        {"cmd": "release"}
+      ],
+      "expected": {"agent_id_consistent": true}
+    }
+  ]
+}

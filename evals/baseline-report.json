@@ -1,0 +1,239 @@
+{
+  "skill_name": "kai-project-governance",
+  "timestamp": "2026-06-03T09:34:05Z",
+  "baseline_version": 1,
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "needs_work": 0,
+    "failed": 0,
+    "pass_rate": 1.0
+  },
+  "average_scores": {
+    "claim_protocol": 5.0,
+    "conflict_detection": 5.0,
+    "degradation_handling": 5.0,
+    "log_integrity": 5.0
+  },
+  "agent_id_consistency": true,
+  "total_findings": 0,
+  "total_elapsed_seconds": 179.11,
+  "results": [
+    {
+      "case_id": 1,
+      "name": "happy-path-no-conflict",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 4,
+      "steps_passed": 4,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 15.25,
+      "summary": "4/4 steps passed"
+    },
+    {
+      "case_id": 2,
+      "name": "file-conflict-detection",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 2,
+      "steps_passed": 2,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 15.26,
+      "summary": "2/2 steps passed"
+    },
+    {
+      "case_id": 3,
+      "name": "directory-conflict",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 1,
+      "steps_passed": 1,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 15.22,
+      "summary": "1/1 steps passed"
+    },
+    {
+      "case_id": 4,
+      "name": "may-affect-conflict",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 1,
+      "steps_passed": 1,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 15.21,
+      "summary": "1/1 steps passed"
+    },
+    {
+      "case_id": 5,
+      "name": "expired-claim-ignored",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 2,
+      "steps_passed": 2,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 5.12,
+      "summary": "2/2 steps passed"
+    },
+    {
+      "case_id": 6,
+      "name": "claim-lifecycle-full",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 7,
+      "steps_passed": 7,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 30.47,
+      "summary": "7/7 steps passed"
+    },
+    {
+      "case_id": 7,
+      "name": "multi-agent-three-way-conflict",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 1,
+      "steps_passed": 1,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 25.35,
+      "summary": "1/1 steps passed"
+    },
+    {
+      "case_id": 8,
+      "name": "self-no-conflict",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 1,
+      "steps_passed": 1,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 15.22,
+      "summary": "1/1 steps passed"
+    },
+    {
+      "case_id": 9,
+      "name": "log-all-phases",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 6,
+      "steps_passed": 6,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 0.31,
+      "summary": "6/6 steps passed"
+    },
+    {
+      "case_id": 10,
+      "name": "log-all-statuses",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 6,
+      "steps_passed": 6,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 0.32,
+      "summary": "6/6 steps passed"
+    },
+    {
+      "case_id": 11,
+      "name": "path-normalization",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 4,
+      "steps_passed": 4,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 20.32,
+      "summary": "4/4 steps passed"
+    },
+    {
+      "case_id": 12,
+      "name": "agent-id-stability",
+      "verdict": "pass",
+      "score": 1.0,
+      "steps_run": 4,
+      "steps_passed": 4,
+      "scores": {
+        "claim_protocol": 5,
+        "conflict_detection": 5,
+        "degradation_handling": 5,
+        "log_integrity": 5
+      },
+      "findings": [],
+      "agent_id_consistent": true,
+      "elapsed_seconds": 20.32,
+      "summary": "4/4 steps passed"
+    }
+  ]
+}

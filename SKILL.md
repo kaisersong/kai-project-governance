@@ -1,6 +1,6 @@
 ---
 name: kai-project-governance
-description: "Use when: (1) an agent is about to modify files, commit code, delete files, modify configs, or execute plans in a multi-agent environment, OR (2) the user asks about coordinating agents, preventing conflicts, or workspace governance. Triggers on: modifying source files, git operations, plan creation, deployment, file deletion, config changes, dependency changes, multi-agent coordination, conflict prevention. Even when the user is actively driving the session, this skill still checks for conflicts and displays warnings — it just doesn't block."
+description: "Use before modifying, deleting, committing, pushing, changing config/dependencies, deploying, or writing plans in a shared repo or multi-agent workspace; use for coordinating agents, workspace claims, conflict prevention, PM approval. Chinese: 并发协作/冲突/多代理治理. Do not use for read-only questions, code search, git diff/log, or running tests."
 ---
 
 # kai-project-governance
@@ -18,6 +18,21 @@ This skill cannot prevent conflicts from agents that don't run it, from shell
 commands, from CI jobs, or from editors. For hard enforcement, use git hooks,
 CI branch protection, or file permissions — those are different layers.
 
+## Setup
+
+Set your stable agent identity before using this skill. Pick one:
+
+```bash
+# Option A: Explicit (recommended for CI/scripts)
+export GOVERNANCE_AGENT_ID="my-agent-session-123"
+
+# Option B: Auto-detected from broker or hostname-based session file
+# No action needed — `governance status` will show your ID
+```
+
+All commands use `scripts/governance.py` which handles path normalization,
+claim storage, conflict detection, and logging deterministically.
+
 ## Governance check flow
 
 Run this flow before each controlled node (planning / implementing / destructive /
@@ -25,54 +40,58 @@ committing / configuring / verifying).
 
 ### Step 1 — Claim your workspace
 
-Before starting a task, publish a workspace claim so other agents know what you
-plan to touch. Read `references/workspace-claims.md` for the full protocol, then:
-
 ```bash
-# Publish your claim
-intent-broker note "{\"type\":\"workspace_claim\",\"action\":\"claim\",\"participantId\":\"$(hostname)-$$\",\"project\":\"$(basename $(git rev-parse --show-toplevel))\",\"files\":[\"path/to/file.py\"],\"directories\":[\"src/module/\"],\"mayAffect\":[\"src/shared/types.py\"],\"taskId\":\"task-$(date +%s)\",\"claimedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"expiresAt\":\"$(date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)\",\"gitHead\":\"$(git rev-parse HEAD)\"}"
+python3 scripts/governance.py claim \
+  --files src/module/main.py src/module/types.py \
+  --dirs src/module/ \
+  --may-affect src/shared/types.py tests/test_module.py
 ```
 
-Also write the same claim to `.governance-claims/<your-agent-id>.json` in the
-project root. This is the authoritative source for claim queries — the broker
-broadcast is just a notification.
+This writes `.governance-claims/<agent-id>.json` and broadcasts via broker
+if available. The script handles timestamps, TTL, path normalization, and git HEAD.
 
-Wait **5 seconds** after publishing. If another agent publishes an overlapping
-claim during this window, compare `taskId` values — the lexicographically smaller
-one wins. If you lose, wait for the other agent to finish or adjust your scope.
-
-### Step 2 — Check broker availability
+Wait **5 seconds** after claiming. Re-check for competing claims:
 
 ```bash
-intent-broker who 2>/dev/null || echo "BROKER_DOWN"
+sleep 5 && python3 scripts/governance.py check --files src/module/main.py
 ```
 
-If the broker is down, skip to Step 3 but note that PM approval is unavailable.
-The local claim files still work for conflict detection.
+If another agent published an overlapping claim during the window, compare
+`taskId` values — the lexicographically smaller one wins. If you lose, wait
+for the other agent to finish or adjust your scope.
 
-### Step 3 — Check for conflicts
+### Step 2 — Check for conflicts
 
-Read all files in `.governance-claims/` and find claims where `expiresAt` is still
-in the future. Compare those claims' `files`, `directories`, and `mayAffect` fields
-against the files you are about to touch. Use git-relative paths (resolved via
-`git rev-parse --show-toplevel`).
+```bash
+python3 scripts/governance.py check \
+  --files src/module/main.py \
+  --dirs src/module/
+```
 
-- **No overlap** → proceed. Log to `.governance-log/<your-agent-id>.jsonl`.
-- **Overlap found** → go to Step 4.
+Output:
+```json
+{
+  "brokerAvailable": true,
+  "activeClaims": 2,
+  "conflicts": [{"participantId": "agent-b", "overlapping_files": ["src/module/main.py"]}],
+  "hasConflict": true
+}
+```
 
-### Step 4 — Is a human actively driving this session?
+- `hasConflict: false` → proceed. Log the action (Step 5).
+- `hasConflict: true` → go to Step 3.
+
+### Step 3 — Human in the loop?
 
 Check whether the most recent user message in this conversation is less than
-5 minutes old. This is a heuristic — it's not a cryptographic proof of human
-attention, just a practical signal.
+5 minutes old.
 
 **If yes (human present):**
 
-Display the conflict information in the conversation:
-
+Display the conflict info in conversation:
 ```
 ⚠️ Workspace conflict detected:
-  - <agent-id> is editing <file-list>
+  - agent-b is editing src/module/main.py
   You may proceed, but be aware of potential merge conflicts.
 ```
 
@@ -83,30 +102,55 @@ Proceed. Log as `skipped_human_in_loop_with_warning`.
 Request PM approval via broker:
 
 ```bash
-intent-broker task qoder "Approval request from <your-agent-id>: <project> / <phase>
+intent-broker task qoder "APPROVAL REQUEST from $(python3 scripts/governance.py status | python3 -c 'import sys,json; print(json.load(sys.stdin)["agentId"])')
+Project: <project> / Phase: <phase>
 Files: <file-list>
-Conflicting agents: <agent-list>
-git HEAD: <sha>
-Action summary: <what you're about to do>"
+Conflicts: <conflict-list>
+git HEAD: $(git rev-parse HEAD)
+Summary: <what you're about to do>"
 ```
 
-Wait up to 120 seconds for a response.
+Wait up to 120 seconds.
 
-- **Approved** → verify `git HEAD` hasn't changed since the request. Proceed.
-- **Rejected** → stop. Adjust per PM feedback.
-- **Timeout** → proceed (degraded). Log as `DEGRADED_CONFLICT`. This event
-  will be flagged for PM review when they come back online.
+- **Approved** → verify `git HEAD` unchanged. Proceed.
+- **Rejected** → stop. Adjust per PM feedback. Log as `rejected`.
+- **Timeout** → proceed (degraded). Log as `DEGRADED_CONFLICT`.
 
-### Step 5 — Log the action
+### Step 4 — Log the action
 
-Append one line to `.governance-log/<your-agent-id>.jsonl`:
-
-```json
-{"timestamp":"<ISO>","agentId":"<id>","project":"<name>","phase":"<phase>","action":"<action>","files":["<list>"],"humanInLoop":<bool>,"conflictDetected":<bool>,"activeConflicts":[<objects>],"approvalStatus":"<status>","gitHeadAtAction":"<sha>","details":"<text>"}
+```bash
+python3 scripts/governance.py log \
+  --phase implementing \
+  --action "edit source" \
+  --files src/module/main.py \
+  --status no_conflict
 ```
 
-`approvalStatus` values: `approved`, `skipped_human_in_loop_with_warning`,
-`no_conflict`, `DEGRADED_CONFLICT`, `BROKER_DOWN_DEGRADED`.
+For conflicts, add flags:
+```bash
+python3 scripts/governance.py log \
+  --phase committing \
+  --action "git push" \
+  --files src/module/main.py src/module/types.py \
+  --human-in-loop \
+  --conflict \
+  --status skipped_human_in_loop_with_warning \
+  --git-head "$(git rev-parse HEAD)"
+```
+
+Valid `--status` values: `approved`, `skipped_human_in_loop_with_warning`,
+`no_conflict`, `DEGRADED_CONFLICT`, `BROKER_DOWN_DEGRADED`, `rejected`.
+
+Valid `--phase` values: `planning`, `implementing`, `destructive`,
+`committing`, `configuring`, `verifying`.
+
+### Step 5 — Release when done
+
+```bash
+python3 scripts/governance.py release
+```
+
+This removes your claim file and broadcasts a release message.
 
 ## Controlled nodes
 
@@ -121,22 +165,23 @@ Append one line to `.governance-log/<your-agent-id>.jsonl`:
 
 ## Claim lifecycle
 
-- **Create**: At task start, before any file edits.
-- **Renew**: Every 10 minutes during long tasks (update `expiresAt`).
-- **Expand**: When you discover the task affects more files than initially claimed,
-  publish an updated claim with the expanded scope.
-- **Release**: When the task completes or you abandon it.
+- **Create**: `governance claim` at task start.
+- **Renew**: `governance renew --ttl 30` every 10 minutes during long tasks.
+- **Expand**: `governance expand --files new_file.py` when scope grows.
+- **Release**: `governance release` when done.
+- **Cleanup**: `governance cleanup` removes expired/malformed claims.
+
+## Status check
 
 ```bash
-# Release your claim
-intent-broker note "{\"type\":\"workspace_claim\",\"action\":\"release\",\"participantId\":\"<your-agent-id>\",\"taskId\":\"<your-task-id>\"}"
-rm .governance-claims/<your-agent-id>.json
+python3 scripts/governance.py status
 ```
+
+Shows your agent ID, active claim, broker availability, and other active claims.
 
 ## PM workflow
 
-When you are the PM reviewing approvals, read `references/pm-governance.md` for
-the full flow including batch approval and degraded-event review.
+When you are the PM reviewing approvals, read `references/pm-governance.md`.
 
 ## Reference files
 

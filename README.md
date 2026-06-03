@@ -10,7 +10,15 @@ English | [简体中文](README.zh-CN.md)
 
 ## How It Works
 
-### Three-Layer Check
+### Three-Tier Behavior Model
+
+| Tier | Name | When | Behavior |
+|------|------|------|----------|
+| 1 (default) | **LINT** | Always active | Conflict detection + warning. Only blocks if conflict AND no human present. |
+| 2 (always on) | **NOTIFY** | On every commit/push | Sends non-blocking notification to PM. Never blocks. |
+| 3 (optional) | **GATE** | When `GOVERNANCE_MODE=gate` | Blocks on every commit/push, waits for PM approval. 120s timeout → degrade. |
+
+### Three-Layer Check (Tier 1 Detail)
 
 Before every controlled action (edit, commit, delete, deploy), the skill runs a three-layer check:
 
@@ -93,6 +101,8 @@ Restart the agent after installation.
 | `governance.py renew [--ttl N]` | Renew your active claim |
 | `governance.py expand --files ...` | Expand claim scope mid-task |
 | `governance.py release` | Release your workspace claim |
+| `governance.py notify --phase ...` | **Tier 2**: Non-blocking notification to PM |
+| `governance.py request-approval --phase ...` | **Tier 3**: Blocking approval request (gate mode) |
 | `governance.py log --phase ... --status ...` | Log a governance action |
 | `governance.py cleanup` | Remove expired/malformed claims |
 | `governance.py status` | Show current governance state |
@@ -159,7 +169,7 @@ Baseline: **12/12 PASS, 100%, all scores 5.0/5.0**
 | degradation_handling | Broker-down and PM-timeout handled with correct fallback |
 | log_integrity | Log entries have correct schema, valid phases, valid statuses |
 
-Unit tests: `pytest tests/ -v` — 69 tests, all passing.
+Unit tests: `pytest tests/ -v` — 71 tests, all passing.
 
 ---
 
@@ -167,6 +177,7 @@ Unit tests: `pytest tests/ -v` — 69 tests, all passing.
 
 | Decision | Choice | Why |
 |----------|--------|-----|
+| Three-tier model | LINT + NOTIFY + GATE | Default is non-blocking; gate is opt-in for strict enforcement |
 | Cooperative, not enforced | Accepted | Hard enforcement belongs in git hooks / CI |
 | File-level granularity | Accepted | Function-level is too expensive; false positives > false negatives |
 | 120s PM timeout → degrade | Accepted | Never block the entire development flow |

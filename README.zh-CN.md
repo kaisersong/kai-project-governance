@@ -10,7 +10,15 @@
 
 ## 工作原理
 
-### 三层检查
+### 三档行为模型
+
+| 档 | 名称 | 何时生效 | 行为 |
+|---|------|---------|------|
+| 档1（默认）| **LINT** | 始终激活 | 冲突检测 + 警告。仅当冲突且无人在场时阻塞。 |
+| 档2（必做）| **NOTIFY** | 每次提交/推送时 | 向 PM 发送非阻塞通知。永远不阻塞流程。 |
+| 档3（可选）| **GATE** | 设置 `GOVERNANCE_MODE=gate` 时 | 每次提交/推送阻塞等待 PM 审批。120 秒超时后降级。 |
+
+### 三层检查（档1 细节）
 
 在每个受控行为（编辑、提交、删除、部署）前，技能执行三层检查：
 
@@ -93,6 +101,8 @@ ln -s /path/to/kai-project-governance ~/.agents/skills/kai-project-governance
 | `governance.py renew [--ttl N]` | 续期活跃声明 |
 | `governance.py expand --files ...` | 任务中途扩展声明范围 |
 | `governance.py release` | 释放工作区声明 |
+| `governance.py notify --phase ...` | **档2**：非阻塞通知 PM |
+| `governance.py request-approval --phase ...` | **档3**：阻塞审批请求（gate 模式） |
 | `governance.py log --phase ... --status ...` | 记录治理动作日志 |
 | `governance.py cleanup` | 清理过期/损坏的声明 |
 | `governance.py status` | 显示当前治理状态 |
@@ -167,6 +177,7 @@ python3 scripts/run_evals.py
 
 | 决策 | 选择 | 原因 |
 |------|------|------|
+| 三档模型 | LINT + NOTIFY + GATE | 默认非阻塞，gate 按需启用 |
 | 合作式，非强制 | 接受 | 硬强制属于 git hooks / CI 的职责 |
 | 文件粒度 | 接受 | 函数级分析成本太高；假阳性优于假阴性 |
 | 120 秒 PM 超时 → 降级 | 接受 | 永远不阻塞整个开发流程 |

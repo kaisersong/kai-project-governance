@@ -164,8 +164,8 @@ This removes your claim file and broadcasts a release message.
 
 ### Tier 2 — Always Notify PM on Commit/Push
 
-Every commit or push sends a non-blocking notification to PM. This never blocks
-the agent — PM sees the notification in their inbox.
+Every commit or push sends a non-blocking notification to PM via broker HTTP API.
+This never blocks the agent — PM sees the notification in their inbox.
 
 ```bash
 python3 scripts/governance.py notify \
@@ -175,8 +175,15 @@ python3 scripts/governance.py notify \
   --summary "add feature X and fix bug Y"
 ```
 
-The notification is sent via `intent-broker reply @qoder` and logged to
-`.governance-log/<agent-id>.jsonl` with status `notified_pm`.
+### Publish-Release Rule (mandatory in all tiers)
+
+**Any external publish action** — `git push`, `gh release create`, `git tag`,
+`clawhub publish` — **must notify PM first** (tier 2), and **must request approval**
+in gate mode (tier 3). This applies even if no conflict is detected. A clean
+push/release is still a governance event.
+
+**Exception**: if PM is confirmed offline and no urgent governance concern exists,
+proceed with `BROKER_DOWN_DEGRADED` log entry.
 
 ### Tier 3 — Gate Mode (Opt-In)
 

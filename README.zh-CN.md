@@ -56,6 +56,10 @@ python3 scripts/governance.py check --files src/main.py
 
 声明 30 分钟后过期（可配置）。长时间任务每 10 分钟续期。
 
+### 发布规则
+
+**任何对外发布动作** — `git push`、`gh release create`、`git tag`、`clawhub publish` — 必须先通知 PM（档2），gate 模式下必须请求审批（档3）。即使无冲突也不跳过。
+
 ### 它不做的事
 
 这是一个**合作式 lint，不是硬锁**。不运行此技能的 agent 仍可编辑文件。如需硬强制，请使用 git hooks、CI 分支保护或文件权限——那些是不同层的防护。
@@ -107,7 +111,17 @@ ln -s /path/to/kai-project-governance ~/.agents/skills/kai-project-governance
 | `governance.py cleanup` | 清理过期/损坏的声明 |
 | `governance.py status` | 显示当前治理状态 |
 
-所有命令需在 git 仓库内执行。Agent 身份通过 `GOVERNANCE_AGENT_ID` 环境变量设置。
+所有命令需在 git 仓库内执行。Agent 身份通过 `GOVERNANCE_AGENT_ID` 环境变量设置。PM 身份通过 `GOVERNANCE_PM_ID`（默认：`qodercli-session-f782cff3`）。Broker 地址通过 `BROKER_URL`（默认：`http://127.0.0.1:4318`）。
+
+### Gate 模式 Pre-Push Hook
+
+安装后在 gate 模式下 `git push` 前自动阻塞等 PM 审批：
+
+```bash
+ln -s /path/to/kai-project-governance/scripts/pre-push.sh .git/hooks/pre-push
+```
+
+Hook 检查 `GOVERNANCE_MODE` — 设为 `gate` 时调用 `request-approval`。
 
 ---
 
@@ -178,6 +192,7 @@ python3 scripts/run_evals.py
 | 决策 | 选择 | 原因 |
 |------|------|------|
 | 三档模型 | LINT + NOTIFY + GATE | 默认非阻塞，gate 按需启用 |
+| 发布规则 | 所有 push/release/tag 必须通知 PM | 无冲突的 push 也是治理事件 |
 | 合作式，非强制 | 接受 | 硬强制属于 git hooks / CI 的职责 |
 | 文件粒度 | 接受 | 函数级分析成本太高；假阳性优于假阴性 |
 | 120 秒 PM 超时 → 降级 | 接受 | 永远不阻塞整个开发流程 |

@@ -56,6 +56,12 @@ python3 scripts/governance.py check --files src/main.py
 
 Claims expire after 30 minutes (configurable). Agents renew every 10 minutes during long tasks.
 
+### Publish-Release Rule
+
+**Any external publish action** — `git push`, `gh release create`, `git tag`,
+`clawhub publish` — must notify PM first (tier 2), and must request approval in
+gate mode (tier 3). This applies even if no conflict is detected.
+
 ### What It Doesn't Do
 
 This is a **cooperative lint, not a hard lock**. Agents that don't run the skill can still edit files. For hard enforcement, use git hooks, CI branch protection, or file permissions — those are different layers.
@@ -107,7 +113,18 @@ Restart the agent after installation.
 | `governance.py cleanup` | Remove expired/malformed claims |
 | `governance.py status` | Show current governance state |
 
-All commands require being inside a git repository. Agent identity is set via `GOVERNANCE_AGENT_ID` env var.
+All commands require being inside a git repository. Agent identity is set via `GOVERNANCE_AGENT_ID` env var. PM identity is set via `GOVERNANCE_PM_ID` (default: `qodercli-session-f782cff3`). Broker URL via `BROKER_URL` (default: `http://127.0.0.1:4318`).
+
+### Gate Mode Pre-Push Hook
+
+Install to automatically block `git push` in gate mode until PM approves:
+
+```bash
+ln -s /path/to/kai-project-governance/scripts/pre-push.sh .git/hooks/pre-push
+```
+
+The hook checks `GOVERNANCE_MODE` — if set to `gate`, it calls `request-approval`
+before allowing the push to proceed.
 
 ---
 
@@ -178,6 +195,7 @@ Unit tests: `pytest tests/ -v` — 71 tests, all passing.
 | Decision | Choice | Why |
 |----------|--------|-----|
 | Three-tier model | LINT + NOTIFY + GATE | Default is non-blocking; gate is opt-in for strict enforcement |
+| Publish-release rule | All push/release/tag must notify PM | Clean push is still a governance event |
 | Cooperative, not enforced | Accepted | Hard enforcement belongs in git hooks / CI |
 | File-level granularity | Accepted | Function-level is too expensive; false positives > false negatives |
 | 120s PM timeout → degrade | Accepted | Never block the entire development flow |

@@ -206,6 +206,7 @@ def cmd_claim(args: argparse.Namespace) -> None:
         "files": sorted(set(files)),
         "directories": sorted(set(dirs)),
         "mayAffect": sorted(set(may_affect)),
+        "priority": args.priority,
         "taskId": args.task_id or f"task-{int(now.timestamp())}",
         "claimedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "expiresAt": expires.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -219,8 +220,10 @@ def cmd_claim(args: argparse.Namespace) -> None:
     # Broadcast via broker if available
     if _is_broker_available():
         try:
+            file_list = ",".join(files + dirs) if files or dirs else "workspace"
             subprocess.run(
-                ["intent-broker", "note", json.dumps(claim, ensure_ascii=False)],
+                ["intent-broker", "group", "notify", "file-changed", _project_name(repo_root),
+                 "--reason", f"claim: {file_list}"],
                 capture_output=True, text=True, timeout=5,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -323,8 +326,10 @@ def cmd_release(args: argparse.Namespace) -> None:
 
     if _is_broker_available():
         try:
+            task_id = claim.get("taskId", "unknown")
             subprocess.run(
-                ["intent-broker", "note", json.dumps(release_msg, ensure_ascii=False)],
+                ["intent-broker", "group", "notify", "file-changed", _project_name(repo_root),
+                 "--reason", f"release: {task_id}"],
                 capture_output=True, text=True, timeout=5,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -424,6 +429,7 @@ def main() -> None:
     p_claim.add_argument("--may-affect", nargs="*", default=[], help="Files you may indirectly affect")
     p_claim.add_argument("--task-id", default=None, help="Explicit task ID")
     p_claim.add_argument("--ttl", type=int, default=None, help="TTL in minutes (default 30)")
+    p_claim.add_argument("--priority", default="normal", help="Claim priority: low/normal/high (default normal)")
 
     # check
     p_check = sub.add_parser("check", help="Check for conflicts before acting")

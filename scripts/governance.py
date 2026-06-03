@@ -78,19 +78,46 @@ def _git_head() -> str:
         return "unknown"
 
 
+def _resolve_pm_id() -> str:
+    """Discover PM participant ID from env or project config. Raises if not found."""
+    pm_id = os.environ.get("GOVERNANCE_PM_ID", "").strip()
+    if not pm_id:
+        config_file = _repo_root() / ".governance.json"
+        if config_file.exists():
+            try:
+                pm_id = json.loads(config_file.read_text()).get("pmId", "").strip()
+            except (json.JSONDecodeError, KeyError):
+                pass
+    if not pm_id:
+        raise RuntimeError(
+            "PM participant ID not configured. "
+            "Set GOVERNANCE_PM_ID env var or create .governance.json "
+            'with {"pmId": "<participantId>"}'
+        )
+    return pm_id
+
+
 def _send_to_pm(summary: str, task_id: str | None = None, thread_id: str | None = None) -> dict:
-    """Send a message to PM via broker HTTP API. Returns delivery result dict."""
+    """Send a message to PM via broker HTTP API. Returns delivery result dict.
+
+    PM participant ID is discovered in this order:
+    1. GOVERNANCE_PM_ID env var (explicit override)
+    2. .governance.json in repo root (project-level config)
+    3. FAIL — no guess, no hardcoded defaults
+    """
     BROKER_URL = os.environ.get("BROKER_URL", "http://127.0.0.1:4318")
-    PM_PARTICIPANT_ID = os.environ.get(
-        "GOVERNANCE_PM_ID", "qodercli-session-f782cff3"
-    )
+
+    try:
+        pm_id = _resolve_pm_id()
+    except RuntimeError as e:
+        return {"deliveredCount": 0, "error": str(e)}
 
     payload = {
         "kind": "reply_message",
         "fromParticipantId": _agent_id(),
         "taskId": task_id,
         "threadId": thread_id,
-        "to": {"mode": "participant", "participants": [PM_PARTICIPANT_ID]},
+        "to": {"mode": "participant", "participants": [pm_id]},
         "payload": {"body": {"summary": summary}},
     }
 
@@ -295,12 +322,16 @@ def cmd_notify(args: argparse.Namespace) -> None:
         "deliveryResult": delivery,
     })
 
-    print(json.dumps({
+    output = {
         "status": "notified" if delivered else "notify_failed",
-        "recipient": "qoder",
         "delivered": delivered,
         "phase": phase,
-    }))
+    }
+    if not delivered and "error" in delivery:
+        output["error"] = delivery["error"]
+        if "hint" in delivery:
+            output["hint"] = delivery["hint"]
+    print(json.dumps(output, ensure_ascii=False))
 
 
 def cmd_request_approval(args: argparse.Namespace) -> None:
@@ -336,9 +367,11 @@ def cmd_request_approval(args: argparse.Namespace) -> None:
     delivery = _send_to_pm(msg, task_id=task_id)
 
     # Wait for PM response (poll inbox)
-    PM_PARTICIPANT_ID = os.environ.get(
-        "GOVERNANCE_PM_ID", "qodercli-session-f782cff3"
-    )
+    try:
+        PM_PARTICIPANT_ID = _resolve_pm_id()
+    except RuntimeError as e:
+        print(json.dumps({"status": "error", "reason": str(e)}))
+        sys.exit(1)
     BROKER_URL = os.environ.get("BROKER_URL", "http://127.0.0.1:4318")
     start = time.time()
     while time.time() - start < timeout:

@@ -198,6 +198,16 @@ python3 scripts/governance.py request-approval \
 If PM approves → proceed. If PM rejects → stop. If timeout → degrade (proceed
 with `DEGRADED_CONFLICT` log entry).
 
+**Automated enforcement:** Install the pre-push hook to enforce gate mode on
+every `git push`:
+
+```bash
+ln -s /path/to/kai-project-governance/scripts/pre-push.sh .git/hooks/pre-push
+```
+
+The hook checks `GOVERNANCE_MODE` — if set to `gate`, it calls
+`request-approval` before allowing the push to proceed.
+
 ## Controlled nodes
 
 | Node | When to check | What to check |

@@ -254,3 +254,4 @@ When you are the PM reviewing approvals, read `references/pm-governance.md`.
 | `references/pm-governance.md` | When acting as PM — approval queue, batch operations, degraded event review |
 | `references/broker-commands.md` | When you need the exact broker CLI syntax for claims, approvals, or queries |
 | `references/operation-severity.md` | When deciding how cautious to be — classifies operations by blast radius |
+| `references/handoff-protocol.md` | Before any cross-agent handoff — mandatory `send-task` rule, handoff checklist |
